@@ -76,7 +76,7 @@ DEF_PACKED_STRUCT vpn_packet {
                 struct vpip_ipv4 vpip_ipv4;
                 struct vpip_ipv6 vpip_ipv6;
                 uint8_t  vpd_signature[VPN_SIGNATURE_SIZE];
-            };
+            } vpip_ipv4;
         } vp_ipconf;
     } vp_payload;
 };
@@ -92,7 +92,7 @@ struct vpn_socket {
     char                user[VPN_MAX_USER];
     enum vpn_state      state;
     struct vpn_key       key;
-    struct vpn_socket   *next;:
+    struct vpn_socket   *next;
 };
 
 

@@ -63,7 +63,7 @@ struct vpn_socket *vpn_client(uint16_t ip_version, void *addr, uint16_t port, ch
     memcpy(&v->key, k, sizeof(struct vpn_key));
     v->conn = vpn_socket_open(ip_version, addr, port);
     memcpy(v->user, user, VPN_MAX_USER);
-    if (vpn_socket_err(v->conn) || vpn_send_login(v) < 0) {
+    if (vpn_socket_err(v) || (vpn_send_login(v) < 0)) {
         vpn_free(v);
         return NULL;
     }

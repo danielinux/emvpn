@@ -1,5 +1,9 @@
+#ifndef VPN_ARCH_INCLUDED
+#define VPN_ARCH_INCLUDED
+
 #include <stdint.h>
 #include <string.h>
+
 
 
 #if defined __IAR_SYSTEMS_ICC__ || defined ATOP
@@ -21,7 +25,7 @@ typedef int VPNSOCKET;
 #define vpn_alloc(x) calloc(1, x);
 #define vpn_free(x) free(x);
 
-#define vpn_socket_err(x) ((x) < 0)
+#define vpn_socket_err(x) ((x->conn) < 0)
 
 static VPNSOCKET vpn_socket_open(uint16_t ip_ver, void *addr, uint16_t port)
 {
@@ -41,8 +45,8 @@ static VPNSOCKET vpn_socket_open(uint16_t ip_ver, void *addr, uint16_t port)
     }
 
     if (ip_ver == 6) {
-        struct sockaddr_in *s_addr = (struct sockaddr_in6 *) &_s_addr;
-        socksize = sizeof(struct in_addr6);
+        struct sockaddr_in6 *s_addr = (struct sockaddr_in6 *) &_s_addr;
+        socksize = sizeof(struct in6_addr);
         s_addr->sin6_family = AF_INET6;
         memcpy(&s_addr->sin6_addr, addr, sizeof(struct in_addr));
         s_addr->sin6_port = htons(port);
@@ -51,11 +55,12 @@ static VPNSOCKET vpn_socket_open(uint16_t ip_ver, void *addr, uint16_t port)
 
     if (sock < 0)
         return sock;
-    if (bind(sock, (struct sockaddr *)_s_addr, socksize) < 0) {
+    if (bind(sock, (struct sockaddr *) &_s_addr, socksize) < 0) {
         close(sock);
         return -1;
     }
     return sock;
 }
 
+#endif
 #endif
