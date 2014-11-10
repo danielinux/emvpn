@@ -1,6 +1,21 @@
+#include <stdint.h>
+#include <string.h>
 #ifndef VPN_H_INC
 #define VPN_H_INC
-#include "arch.h"
+
+/****************************
+ * Compiler selection
+ */
+
+
+#if defined __IAR_SYSTEMS_ICC__ || defined ATOP
+#   define DEF_PACKED_STRUCT __packed struct
+#   define DEF_PACKED_UNION  __packed union
+#else
+#   define DEF_PACKED_STRUCT struct __attribute__((packed))
+#   define DEF_PACKED_UNION  union /* No need to pack unions in GCC */
+#endif
+
 enum vpn_state {
     VPN_LOGIN_SENT = 0,
     VPN_RESPONSE_SENT,
@@ -23,7 +38,6 @@ enum vpn_msgtype {
     VM_KEEPALIVE,
     VM_IPCONFIG,
     VM_DATA,
-    VM_DATA_FRAG,
     VM_RESET,
     VM_TYPE_MAX
 };
@@ -31,10 +45,14 @@ enum vpn_msgtype {
 
 #define VPN_KEY_LEN 32
 #define VPN_MAX_USER 128
+#define VPN_MAX_ADDR 128
 #define VPN_IV_LEN  16
 #define VPN_CHALLENGE_SIZE 512
 #define VPN_SIGNATURE_SIZE 32 /* Sha2 */
+#define VPN_MAX_RETRIES 3
 
+#define VPN_TIMER_KEEPALIVE 10000
+#define VPN_TIMER_HANDSHAKE 600
 
 DEF_PACKED_STRUCT vpip_ipv4
 {
@@ -55,13 +73,14 @@ DEF_PACKED_STRUCT vpip_ipv6
 
 
 DEF_PACKED_STRUCT vpn_packet {
-    struct vpn_packet_msg {
+    DEF_PACKED_STRUCT vpn_packet_msg {
         uint16_t type;
         uint16_t tot_len;
     } vp_msg;
     DEF_PACKED_UNION vpn_packet_payload {
-        char vp_login[0];
-        char vp_challenge[VPN_CHALLENGE_SIZE];
+        uint8_t vp_raw[0];
+        uint8_t vp_login[0];
+        uint8_t vp_challenge[VPN_CHALLENGE_SIZE];
         DEF_PACKED_STRUCT vp_data {
             uint8_t vpd_frags;
             uint8_t vpd_frag_id;
@@ -88,38 +107,59 @@ struct vpn_key {
 };
 
 struct vpn_socket {
-    VPNSOCKET           conn;
+    int                 conn;
+    void                *priv;
     char                user[VPN_MAX_USER];
     enum vpn_state      state;
+    void                *timer;
+    int                 timer_retry;
     struct vpn_key       key;
+    uint8_t             ep_addr[VPN_MAX_ADDR];
+    uint16_t            ep_port;
+    uint16_t            ep_ipver;
+    int                 (*vpn_recv)(void *arg, uint8_t *data, int len);
+    void                *vpn_recv_arg;
     struct vpn_socket   *next;
 };
 
 
 
-
+/* Macros */
 #define IS_SERVER(v) (((v)->state > VPN_IDLE))
 
-/* Data methods / generic fn */
-static void vpn_data(struct vpn_socket *sck, void *data, int len);
-static void vpn_frag(struct vpn_socket *sck, void *data, int len);
-static void vpn_timeout_ka(struct vpn_socket *sck, uint64_t now);
+#define VPN_CHECK_MSG(v, type) { \
+    if (vpn_ntohs((v)->vp_msg.type) != type) \
+        return -1; \
+}
+
+#define VPN_CHECK_SIZE(v, tot_len, msg_len) { \
+    if (vpn_ntohs((v)->vp_msg.tot_len) != tot_len) \
+        return -1; \
+    if (msg_len && msg_len != (vpn_ntohs(v)->vp_msg.tot_len - sizeof(struct vpn_packet_msg))) \
+        return -2; \
+}
 
 
-/* Client methods */
-static void vpn_challenge(struct vpn_socket *sck, void *data, int len);
-static void vpn_auth_ok(struct vpn_socket *sck, void *data, int len);
-static void vpn_auth_deny(struct vpn_socket *sck, void *data, int len);
-static void vpn_restart(struct vpn_socket *sck, void *data, int len);
-static void vpn_ka(struct vpn_socket *sck, void *data, int len);
-static void vpn_ipconf(struct vpn_socket *sck, void *data, int len);
-static void vpn_timeout_cli(struct vpn_socket *sck, uint64_t now);
+/* SYSTEM interface. */
+void *vpn_alloc(int x);
+void vpn_free(void *x);
+int vpn_socket_send(struct vpn_socket *v, void *pkt, int len);
+int vpn_socket_connect(struct vpn_socket *v);
+void vpn_timer_add(struct vpn_socket *v, uint64_t count);
+uint64_t vpn_time(void);
 
-/* Server methods */
-static void vpn_login(struct vpn_socket *sck, void *data, int len);
-static void vpn_response(struct vpn_socket *sck, void *data, int len);
-static void vpn_rst(struct vpn_socket *sck, void *data, int len);
-static void vpn_timeout_srv(struct vpn_socket *sck, uint64_t now);
+uint16_t vpn_ntohs(uint16_t);
+uint16_t vpn_htons(uint16_t);
+uint32_t vpn_ntohl(uint32_t);
+uint32_t vpn_htohl(uint32_t);
+
+/* CRYPTO interface */
+int vpn_encrypt(struct vpn_socket *v, uint8_t *to, uint8_t *from, int len);
+int vpn_decrypt(struct vpn_socket *v, uint8_t *to, uint8_t *from, int len);
+
+
+/* Call me back in case of timer expiration */
+void vpn_timer_callback(struct vpn_socket *v);
 
 
 #endif

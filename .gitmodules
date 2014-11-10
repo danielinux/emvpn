@@ -1,3 +1,3 @@
-[submodule "posix/lib/libevquick"]
-	path = posix/lib/libevquick
+[submodule "lib/libevquick"]
+	path = lib/libevquick
 	url = git@github.com:danielinux/libevquick.git
