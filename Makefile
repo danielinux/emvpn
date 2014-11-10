@@ -1,5 +1,5 @@
 CC:=gcc
-CFLAGS= -Wall -I posix/lib/libevquick -I.
+CFLAGS= -Wall -I lib/libevquick -I.
 SYSTEM?=posix
 CRYPTO?=none
 
@@ -28,15 +28,15 @@ all: posix
 posix: vpn
 
 
-crypto_none.o: crypto/lib/crypto_none.c
+crypto_none.o: crypto/crypto_none.c
 	gcc -c -o $@ $^ $(CFLAGS)
 
-sys_posix.o: posix/lib/sys_posix.c
+sys_posix.o: sys/sys_posix.c
 	gcc -c -o $@ $^ $(CFLAGS)
 
 vpn: vpn.o linux_main.o libevquick.o $(OBJ)
 
-libevquick.o: posix/lib/libevquick/libevquick.c
+libevquick.o: lib/libevquick/libevquick.c
 	gcc -c -o $@ $^ $(CFLAGS)
 
 
