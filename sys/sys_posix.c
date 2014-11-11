@@ -100,7 +100,7 @@ int vpn_socket_connect(struct vpn_socket *v)
 
 static void posix_vpn_timer_callback(void *arg)
 {
-    vpn_timer_callback((struct vpn_socket *)arg);
+    vpn_core_timer_callback((struct vpn_socket *)arg);
 }
 
 

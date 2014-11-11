@@ -140,13 +140,33 @@ struct vpn_socket {
 }
 
 
-/* SYSTEM interface. */
+/* SYSTEM interface.  A system should implement these. */
+
+/* Allocator */
 void *vpn_alloc(int x);
 void vpn_free(void *x);
-int vpn_socket_send(struct vpn_socket *v, void *pkt, int len);
-int vpn_socket_connect(struct vpn_socket *v);
-void vpn_timer_add(struct vpn_socket *v, uint64_t count);
+
+/* Time function: return elapsed milliseconds */
 uint64_t vpn_time(void);
+
+/* Time management */
+void vpn_timer_add(struct vpn_socket *v, uint64_t count);
+void vpn_timer_defuse(struct vpn_socket *v);
+/* Internal function: do not define this, call back in case of timer expiration */
+void vpn_core_timer_callback(struct vpn_socket *v);
+
+int vpn_socket_connect(struct vpn_socket *v);
+int vpn_socket_listen(struct vpn_socket *v);
+int vpn_socket_send(struct vpn_socket *v, void *pkt, int len);
+int vpn_socket_recv(struct vpn_socket *v, void *pkt, int len);
+int vpn_data_received(struct vpn_socket *v, void *data, int len);
+
+/* Core calls: inform VPN about socket events */
+void vpn_core_socket_recv(struct vpn_socket *v);
+void vpn_core_socket_error(struct vpn_socket *v);
+void vpn_core_data_dispose(uint8_t *data);
+void vpn_core_send(struct vpn_socket *v, uint8_t *data, int len);
+
 
 uint16_t vpn_ntohs(uint16_t);
 uint16_t vpn_htons(uint16_t);
@@ -158,8 +178,6 @@ int vpn_encrypt(struct vpn_socket *v, uint8_t *to, uint8_t *from, int len);
 int vpn_decrypt(struct vpn_socket *v, uint8_t *to, uint8_t *from, int len);
 
 
-/* Call me back in case of timer expiration */
-void vpn_timer_callback(struct vpn_socket *v);
 
 
 #endif

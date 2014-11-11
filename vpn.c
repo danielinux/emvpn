@@ -167,7 +167,7 @@ static void vpn_timeout_cli(struct vpn_socket *v, uint64_t now)
     }
 }
 
-void vpn_dispose_data(uint8_t *data)
+void vpn_core_data_dispose(uint8_t *data)
 {
     uint8_t *origin;
     if (!data)
@@ -220,8 +220,18 @@ struct vpn_fsm_event vpn_fsm[VPN_STATE_MAX] = {
 
 
 /* Public interface */
-void vpn_timer_callback(struct vpn_socket *v)
+void vpn_core_timer_callback(struct vpn_socket *v)
 {
     if (vpn_fsm[v->state].ev_timeout)
         vpn_fsm[v->state].ev_timeout(v, vpn_time());
+}
+
+void vpn_core_socket_recv(struct vpn_socket *v)
+{
+
+}
+
+void vpn_core_socket_error(struct vpn_socket *v)
+{
+
 }
