@@ -2,9 +2,12 @@ CC:=gcc
 CFLAGS= -Wall -I lib/libevquick -I.
 SYSTEM?=posix
 CRYPTO?=none
+SERVER?=n
+
 
 ifeq ($(SYSTEM),posix)
    OBJ+=sys_posix.o
+   SERVER=y
 endif
 
 ifeq ($(SYSTEM),picotcp)
@@ -23,10 +26,13 @@ ifeq ($(CRYPTO),none)
 	OBJ+=crypto_none.o
 endif
 
+ifeq ($(SERVER),y)
+  CFLAGS+=-DVPN_SERVER
+endif
+
 all: posix
 
-posix: vpn
-
+posix: vpn_client vpn_server
 
 crypto_none.o: crypto/crypto_none.c
 	gcc -c -o $@ $^ $(CFLAGS)
@@ -34,11 +40,15 @@ crypto_none.o: crypto/crypto_none.c
 sys_posix.o: sys/sys_posix.c
 	gcc -c -o $@ $^ $(CFLAGS)
 
-vpn: vpn.o linux_main.o libevquick.o $(OBJ)
+vpn_client: vpn.o linux_main.o libevquick.o $(OBJ) 
+	gcc -o $@ $^
+
+vpn_server: vpn.o linux_main.o libevquick.o $(OBJ) 
+	gcc -o $@ $^
 
 libevquick.o: lib/libevquick/libevquick.c
 	gcc -c -o $@ $^ $(CFLAGS)
 
 
 clean:
-	rm -f *.o vpn 
+	rm -f *.o vpn_server vpn_client

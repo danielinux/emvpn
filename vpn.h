@@ -52,6 +52,7 @@ enum vpn_msgtype {
 #define VPN_CHALLENGE_SIZE 512
 #define VPN_SIGNATURE_SIZE 32 /* Sha2 */
 #define VPN_MAX_RETRIES 3
+#define VPN_MAX_PKT 1500
 
 #define VPN_TIMER_KEEPALIVE 10000
 #define VPN_TIMER_HANDSHAKE 600
@@ -107,6 +108,15 @@ DEF_PACKED_STRUCT vpn_packet {
     } vp_payload;
 };
 
+struct vpn_socket;
+
+
+struct vpn_session {
+    struct vpn_socket *sock;
+    union vpn_ipconfig ipconf;
+    uint8_t *challenge;
+    struct vpn_session *next;
+};
 
 struct vpn_key {
     uint8_t key[VPN_KEY_LEN];
@@ -126,6 +136,7 @@ struct vpn_socket {
     uint16_t            ep_ipver;
     int                 (*vpn_recv)(void *arg, uint8_t *data, int len);
     void                *vpn_recv_arg;
+    struct vpn_session  *session;
     struct vpn_socket   *next;
 };
 
@@ -165,8 +176,8 @@ void vpn_core_timer_callback(struct vpn_socket *v);
 int vpn_socket_connect(struct vpn_socket *v);
 int vpn_socket_listen(struct vpn_socket *v);
 int vpn_socket_send(struct vpn_socket *v, void *pkt, int len);
-int vpn_socket_recv(struct vpn_socket *v, void *pkt, int len);
-int vpn_data_received(struct vpn_socket *v, void *data, int len);
+int vpn_socket_recvfrom(struct vpn_socket *v, void *pkt, int len, uint16_t *family, void *addr, uint16_t *port);
+void vpn_socket_close(struct vpn_socket *v);
 
 /* Core calls: inform VPN about socket events */
 void vpn_core_socket_recv(struct vpn_socket *v);

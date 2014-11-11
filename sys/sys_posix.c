@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include <fcntl.h>
 #include "vpn.h"
 
 void *vpn_alloc(int x){
@@ -35,8 +36,6 @@ uint32_t vpn_htohl(uint32_t x)
     return htonl(x);
 }
 
-
-
 int vpn_socket_send(struct vpn_socket *v, void *pkt, int len)
 {
     struct sockaddr_storage _s_addr;
@@ -61,6 +60,31 @@ int vpn_socket_send(struct vpn_socket *v, void *pkt, int len)
     } else return -1;
 
     return sendto(v->conn, pkt, len, 0, (struct sockaddr *)&_s_addr, socksize);
+}
+
+int vpn_socket_recvfrom(struct vpn_socket *v, void *pkt, int len, uint16_t *family, void *addr, uint16_t *port)
+{
+    struct sockaddr_storage _s_addr;
+    int ret;
+    unsigned int socksize = sizeof(struct sockaddr_storage);
+
+    ret = recvfrom(v->conn, pkt, len, 0, (struct sockaddr *) &_s_addr, &socksize);
+    if (ret < 0)
+        return ret;
+    if (socksize == sizeof(struct sockaddr_in)) {
+        struct sockaddr_in *s_addr = (struct sockaddr_in *) &_s_addr;
+        memcpy(addr, &s_addr->sin_addr.s_addr, 4);
+        *port = vpn_ntohs(s_addr->sin_port);
+        *family = 4;
+    } else if (socksize == sizeof(struct sockaddr_in6)) {
+        struct sockaddr_in6 *s_addr = (struct sockaddr_in6 *) &_s_addr;
+        memcpy(addr, &s_addr->sin6_addr, 16);
+        *port = vpn_ntohs(s_addr->sin6_port);
+        *family = 6;
+    } else {
+        return -1;
+    }
+    return ret;
 }
 
 int vpn_socket_connect(struct vpn_socket *v)
@@ -98,6 +122,26 @@ int vpn_socket_connect(struct vpn_socket *v)
     return sock;
 }
 
+void vpn_socket_close(struct vpn_socket *v)
+{
+    close(v->conn);
+    v->conn = -1;
+}
+
+int vpn_random(uint8_t *data, int len)
+{
+    int fd = open("/dev/urandom", O_RDONLY);
+    int r;
+    int e;
+    if (fd < 0)
+        return fd;
+    r = read(fd, data, len);
+    e = errno;
+    close(fd);
+    errno = e;
+    return r;
+}
+
 static void posix_vpn_timer_callback(void *arg)
 {
     vpn_core_timer_callback((struct vpn_socket *)arg);
@@ -107,6 +151,12 @@ static void posix_vpn_timer_callback(void *arg)
 void vpn_timer_add(struct vpn_socket *v, uint64_t count)
 {
     v->timer = evquick_addtimer(count, 0, posix_vpn_timer_callback, v);
+}
+
+void vpn_timer_defuse(struct vpn_socket *v)
+{
+    evquick_deltimer(v->timer);
+    v->timer = NULL;
 }
 
 uint64_t vpn_time(void)
