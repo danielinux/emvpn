@@ -1,4 +1,4 @@
 vpn
-.o
-.a
+*.o
+*.a
 tags

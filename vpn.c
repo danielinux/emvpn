@@ -1,64 +1,18 @@
 #include "vpn.h"
 
-/* Server */
-struct vpn_socket *vlist = NULL;
-
 /* Data methods / generic fn */
 static void vpn_data(struct vpn_socket *sck, void *data, int len) 
 {
 
 }
 
-/* Client methods */
-static void vpn_ipconf(struct vpn_socket *sck, void *data, int len)
+static void vpn_statetimer_add(struct vpn_socket *v)
 {
-
+    uint64_t tlapse = (VPN_TIMER_HANDSHAKE << (uint64_t)v->timer_retry);
+    if (v->state == VPN_CLIENT_CONNECTED || v->state == VPN_SERVER_CONNECTED)
+        tlapse = VPN_TIMER_KEEPALIVE;
+    vpn_timer_add(v, tlapse);
 }
-
-/* Server methods */
-static void vpn_login(struct vpn_socket *sck, void *data, int len)
-{
-
-}
-
-static void vpn_response(struct vpn_socket *sck, void *data, int len)
-{
-
-}
-
-static void vpn_rst(struct vpn_socket *sck, void *data, int len)
-{
-
-}
-
-static void vpn_timeout_srv(struct vpn_socket *sck, uint64_t now)
-{
-
-}
-
-static void vlist_add(struct vpn_socket *v)
-{
-    v->next = vlist;
-}
-
-static void vlist_del(struct vpn_socket *v)
-{
-    struct vpn_socket *cur = vlist, *prev = NULL;
-    while(cur) {
-        if (cur == v) {
-            if (prev)
-                prev->next = cur->next;
-            else
-                vlist = cur->next;
-            vpn_free(cur);
-            break;
-        }
-        prev = cur;
-        cur = cur->next; 
-    }
-}
-
-
 
 static int vpn_dgram_send(struct vpn_socket *v, enum vpn_msgtype type, void *data, int len)
 {
@@ -83,17 +37,179 @@ static int vpn_dgram_send(struct vpn_socket *v, enum vpn_msgtype type, void *dat
     return vpn_socket_send(v, pkt, tot_len);
 }
 
+/* Server */
 
-static void vpn_statetimer_add(struct vpn_socket *v)
+struct vpn_user {
+    char name[VPN_MAX_USER];
+    union vpn_ipconfig ipconf;
+};
+
+struct vpn_session {
+    struct vpn_socket *sock;
+    struct vpn_user *user;
+    uint8_t *challenge;
+    struct vpn_session *next;
+};
+
+struct vpn_session *vlist = NULL;
+struct vpn_user *ulist = NULL;
+
+static void vlist_del(struct vpn_session *v)
 {
-    uint64_t tlapse = (VPN_TIMER_HANDSHAKE << (uint64_t)v->timer_retry);
-    if (v->state == VPN_CLIENT_CONNECTED || v->state == VPN_SERVER_CONNECTED)
-        tlapse = VPN_TIMER_KEEPALIVE;
-    vpn_timer_add(v, tlapse);
+    struct vpn_session *cur = vlist, *prev = NULL;
+    while(cur) {
+        if (cur == v) {
+            if (prev)
+                prev->next = cur->next;
+            else
+                vlist = cur->next;
+            vpn_free(cur);
+            break;
+        }
+        prev = cur;
+        cur = cur->next; 
+    }
 }
+
+static struct vpn_session  *vlist_getbyuser(char *user)
+{
+    struct vpn_session *cur = vlist;
+    while (cur) {
+        if (strcmp(cur->user->name, user) == 0)
+            return cur;
+        cur = cur->next;
+    }
+    return NULL;
+}
+
+static struct vpn_session *vlist_getbysock(struct vpn_socket *sck)
+{
+    struct vpn_session *cur = vlist;
+    while (cur) {
+        if (cur->sock == sck)
+            return cur;
+        cur = cur->next;
+    }
+    return NULL;
+}
+
+static struct vpn_session *new_session(struct vpn_socket *sck, char *user)
+{
+    struct vpn_session *vs;
+    vs = vpn_alloc(sizeof(struct vpn_session));
+    if (!vs)
+        return NULL;
+    vs->sock = sck;
+    vs->user = vpn_alloc(sizeof(struct vpn_user));
+    if (!vs->user) {
+        vpn_free(vs);
+        return NULL;
+    }
+    strncpy(vs->user->name, user, VPN_MAX_USER);
+    vpn_get_key(vs->user->name, &vs->sock->key);
+    vpn_get_ipconf(vs->user->name, &vs->user->ipconf);
+    return vs;
+}
+
+static void vpn_send_challenge(struct vpn_session *vs)
+{
+    uint8_t challenge[VPN_CHALLENGE_SIZE]; 
+    vs->sock->state = VPN_STALE;
+
+    if (vpn_random(challenge, VPN_CHALLENGE_SIZE) < 0)
+        return;
+
+    vs->challenge = vpn_alloc(VPN_CHALLENGE_SIZE);
+    if (!vs->challenge)
+        return;
+
+    if (vpn_encrypt(vs->sock, vs->challenge, challenge, VPN_CHALLENGE_SIZE) == VPN_CHALLENGE_SIZE) {
+        if (vpn_dgram_send(vs->sock, VM_CHALLENGE, challenge, VPN_CHALLENGE_SIZE) > 0)
+            vs->sock->state = VPN_CHALLENGE_SENT;
+    }
+}
+
+static void vpn_login(struct vpn_socket *sck, void *data, int len)
+{
+    struct vpn_packet *pkt = (struct vpn_packet *) data;
+    struct vpn_session *vs = vlist_getbyuser(pkt->vp_payload.vp_login);
+
+    if (vs) { /* Already logged in */
+        if (!vs->sock || (vs->sock->state != VPN_SERVER_CONNECTED)) {
+            vs->sock = sck;
+        } else {
+            return; /* Client is already connected, ignored. */
+        }
+    }
+
+    if (!vs) {
+        vs = new_session(sck, pkt->vp_payload.vp_login);
+    }
+
+    if (vs)
+        vpn_send_challenge(vs);
+    vpn_statetimer_add(vs->sock);
+}
+
+static void vpn_response(struct vpn_socket *sck, void *data, int len)
+{
+    struct vpn_packet *pkt = (struct vpn_packet *) data;
+    struct vpn_session *vs;
+    
+    vs = vlist_getbysock(sck);
+    if (!vs)
+        return;
+    if (memcmp(vs->challenge, pkt->vp_payload.vp_challenge, VPN_CHALLENGE_SIZE) == 0) {
+        if (vpn_dgram_send(sck, VM_AUTH_OK, NULL, 0) > 0)
+            sck->state = VPN_SERVER_CONNECTED;
+        else
+            sck->state = VPN_STALE;
+    }
+    vpn_free(vs->challenge);
+    vs->challenge = NULL;
+    vpn_statetimer_add(vs->sock);
+}
+
+static void vpn_rst(struct vpn_socket *sck, void *data, int len)
+{
+    struct vpn_session *vs;
+    vs = vlist_getbysock(sck);
+    if (vs && vs->challenge) {
+        vpn_free(vs->challenge);
+        vs->challenge = NULL;
+    }
+    sck->state = VPN_STALE;
+    vpn_statetimer_add(vs->sock);
+}
+
+static void vpn_timeout_srv(struct vpn_socket *v, uint64_t now)
+{
+    struct vpn_session *vs;
+    if (v->state == VPN_STALE) {
+        vs = vlist_getbysock(v);
+        if (vs) {
+            vlist_del(vs);
+        }
+        vpn_free(v);
+        return;
+    }
+    if (++v->timer_retry > VPN_MAX_RETRIES) {
+        v->state = VPN_STALE;
+    }
+    if (v->state == VPN_SERVER_CONNECTED)
+        vpn_dgram_send(v, VM_KEEPALIVE, NULL, 0);
+    vpn_statetimer_add(v);
+}
+
+
 
 /* Client */
 
+static void vpn_ipconf(struct vpn_socket *sck, void *data, int len)
+{
+    /* TODO: add SYSTEM function ... */
+
+}
 
 static void vpn_challenge(struct vpn_socket *v, void *data, int len)
 {
@@ -211,11 +327,12 @@ struct vpn_fsm_event vpn_fsm[VPN_STATE_MAX] = {
 /* { STATE                 { LOGIN   CHALLENGE       RESPONSE    AUTH_OK         DENY            IP_CONF     KA      DATA         RST     },   TIMEOUT         }*/
    { VPN_LOGIN_SENT,       { NULL,   vpn_challenge,  NULL,       NULL,           NULL,           NULL,       NULL,   NULL,        NULL    }, vpn_timeout_cli   },
    { VPN_RESPONSE_SENT,    { NULL,   NULL,           NULL,       vpn_auth_ok,    vpn_auth_deny,  NULL,       NULL,   NULL,        NULL    }, vpn_timeout_cli   },
-   { VPN_CLIENT_CONNECTED, { NULL,   NULL,    NULL,       NULL,           NULL,           vpn_ipconf, vpn_ka, vpn_data,    NULL    }, vpn_timeout_cli   },
+   { VPN_CLIENT_CONNECTED, { NULL,   NULL,           NULL,       NULL,           NULL,           vpn_ipconf, vpn_ka, vpn_data,    NULL    }, vpn_timeout_cli   },
    { VPN_IDLE,             {                                                                                                              }, vpn_timeout_cli   },
-   { VPN_LISTEN,           { vpn_login                                                                                                    }, vpn_timeout_srv   },
+   { VPN_LISTEN,           { vpn_login, NULL,        NULL,       NULL,           NULL,           NULL,       NULL,   NULL,        NULL    }, vpn_timeout_srv   },
    { VPN_CHALLENGE_SENT,   { NULL,      NULL,        vpn_response,   NULL,       NULL,           NULL,       NULL,   NULL,        vpn_rst }, vpn_timeout_srv   },
-   { VPN_SERVER_CONNECTED, { vpn_login, NULL,        NULL,           NULL,       NULL,           NULL,       vpn_ka, vpn_data,    vpn_rst }, vpn_timeout_srv   }
+   { VPN_STALE,            { NULL,      NULL,        NULL,           NULL,       NULL,           NULL,       NULL,   NULL,        vpn_rst }, vpn_timeout_srv   },
+   { VPN_SERVER_CONNECTED, { NULL,      NULL,        NULL,           NULL,       NULL,           NULL,       vpn_ka, vpn_data,    NULL    }, vpn_timeout_srv   }
 };
 
 

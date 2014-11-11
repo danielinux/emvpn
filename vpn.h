@@ -17,15 +17,17 @@
 #endif
 
 enum vpn_state {
+    /* client */
     VPN_LOGIN_SENT = 0,
     VPN_RESPONSE_SENT,
     VPN_CLIENT_CONNECTED,
-
     VPN_IDLE,
 
+    /* server */
     VPN_LISTEN,
     VPN_CHALLENGE_SENT,
     VPN_SERVER_CONNECTED,
+    VPN_STALE,
     VPN_STATE_MAX
 };
 
@@ -56,6 +58,8 @@ enum vpn_msgtype {
 
 DEF_PACKED_STRUCT vpip_ipv4
 {
+    uint16_t family;
+    uint16_t zero;
     uint32_t ip_addr;
     uint32_t ip_nm;
     uint32_t ip_gw;
@@ -64,12 +68,18 @@ DEF_PACKED_STRUCT vpip_ipv4
 
 DEF_PACKED_STRUCT vpip_ipv6
 {
+    uint16_t family;
+    uint16_t zero;
     uint8_t ip6_addr[16];
     uint8_t ip6_nm[16];
     uint8_t ip6_gw[16];
     uint8_t ip6_dns[16];
 };
 
+DEF_PACKED_UNION vpn_ipconfig {
+    struct vpip_ipv4 vp_ipv4;
+    struct vpip_ipv6 vp_ipv6;
+};
 
 
 DEF_PACKED_STRUCT vpn_packet {
@@ -79,7 +89,7 @@ DEF_PACKED_STRUCT vpn_packet {
     } vp_msg;
     DEF_PACKED_UNION vpn_packet_payload {
         uint8_t vp_raw[0];
-        uint8_t vp_login[0];
+        char    vp_login[0];
         uint8_t vp_challenge[VPN_CHALLENGE_SIZE];
         DEF_PACKED_STRUCT vp_data {
             uint8_t vpd_frags;
@@ -91,11 +101,8 @@ DEF_PACKED_STRUCT vpn_packet {
             uint8_t  vpd_data[0];
         } vp_data;
         DEF_PACKED_STRUCT vp_ipconfig {
-            DEF_PACKED_UNION vpip_ver {
-                struct vpip_ipv4 vpip_ipv4;
-                struct vpip_ipv6 vpip_ipv6;
-                uint8_t  vpd_signature[VPN_SIGNATURE_SIZE];
-            } vpip_ipv4;
+            union vpn_ipconfig ipconf;
+            uint8_t            signature[VPN_SIGNATURE_SIZE];
         } vp_ipconf;
     } vp_payload;
 };
@@ -178,6 +185,12 @@ int vpn_encrypt(struct vpn_socket *v, uint8_t *to, uint8_t *from, int len);
 int vpn_decrypt(struct vpn_socket *v, uint8_t *to, uint8_t *from, int len);
 
 
+/* SERVER APP interface */
+
+/* Server DB calls: to be implemented if running a vpn server */
+int vpn_get_key(char *username, struct vpn_key *key);
+int vpn_get_ipconf(char *username, union vpn_ipconfig *ipconf);
+int vpn_random(uint8_t *buf, int len);
 
 
 #endif
