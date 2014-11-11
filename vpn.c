@@ -85,7 +85,7 @@ static struct vpn_session *new_session(char *user, uint16_t ipver, void *addr, u
         vpn_free(vs);
         return NULL;
     }
-    
+
     vs->sock->ep_ipver = ipver;
     vs->sock->ep_port = port;
     memcpy(vs->sock->ep_addr, addr, (ipver == 4)?4:16);
@@ -353,6 +353,8 @@ void vpn_core_socket_recv(struct vpn_socket *v)
         if (v->state == VPN_LISTEN) {
             struct vpn_session *vs;
             vs = new_session(pkt->vp_payload.vp_login, netver, addr, port);
+            vs->sock->conn = v->conn;
+            vs->sock->priv = v->priv;
             v = vs->sock;
         }
         /* Sanity address check against stored endpoint */

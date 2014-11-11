@@ -34,7 +34,6 @@ void usage(char *prg)
 {
     fprintf(stderr, "Usage: %s [addr] [port]\n", prg);
     exit(6);
-
 }
 
 static void client_cb(int fd, short rev, void *arg)
@@ -82,8 +81,7 @@ int main(int argc, char *argv[])
         is_server = 1;
 
     evquick_init();
-
-    if (is_server) /* TODO */
+    if (is_server)
         server(argc,argv);
     else
         client(argc,argv);
@@ -91,6 +89,5 @@ int main(int argc, char *argv[])
     for(;;) {
         evquick_loop();
     }
-
     return 0;
 }
