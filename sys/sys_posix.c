@@ -47,16 +47,16 @@ int vpn_socket_send(struct vpn_socket *v, void *pkt, int len)
 
     if (v->ep_ipver == 6) {
         struct sockaddr_in6 *s_addr = (struct sockaddr_in6 *) &_s_addr;
-        socksize = sizeof(struct in6_addr);
+        socksize = sizeof(struct sockaddr_in6);
         s_addr->sin6_family = AF_INET6;
         memcpy(&s_addr->sin6_addr, v->ep_addr, sizeof(struct in6_addr));
-        s_addr->sin6_port = htons(v->ep_port);
+        s_addr->sin6_port = v->ep_port;
     } else if (v->ep_ipver == 4) {
         struct sockaddr_in *s_addr = (struct sockaddr_in *) &_s_addr;
-        socksize = sizeof(struct in_addr);
+        socksize = sizeof(struct sockaddr_in);
         s_addr->sin_family = AF_INET;
         memcpy(&s_addr->sin_addr, v->ep_addr, sizeof(struct in_addr));
-        s_addr->sin_port = htons(v->ep_port);
+        s_addr->sin_port = v->ep_port;
     } else return -1;
 
     return sendto(v->conn, pkt, len, 0, (struct sockaddr *)&_s_addr, socksize);
@@ -90,36 +90,34 @@ int vpn_socket_recvfrom(struct vpn_socket *v, void *pkt, int len, uint16_t *fami
 int vpn_socket_connect(struct vpn_socket *v)
 {
     struct sockaddr_storage _s_addr;
-    int sock = -1;
-    int socksize;
     memset(&_s_addr, 0, sizeof(_s_addr));
     errno = EINVAL;
 
     if (v->ep_ipver == 4) {
         struct sockaddr_in *s_addr = (struct sockaddr_in *) &_s_addr;
-        socksize = sizeof(struct in_addr);
+//        socksize = sizeof(struct in_addr);
         s_addr->sin_family = AF_INET;
         memcpy(&s_addr->sin_addr.s_addr, v->ep_addr, sizeof(struct in_addr));
         s_addr->sin_port = htons(v->ep_port);
-        sock = socket(AF_INET, SOCK_DGRAM, 0);
+        v->conn = socket(AF_INET, SOCK_DGRAM, 0);
     }
 
     if (v->ep_ipver == 6) {
         struct sockaddr_in6 *s_addr = (struct sockaddr_in6 *) &_s_addr;
-        socksize = sizeof(struct in6_addr);
+//        socksize = sizeof(struct in6_addr);
         s_addr->sin6_family = AF_INET6;
         memcpy(&s_addr->sin6_addr, v->ep_addr, sizeof(struct in6_addr));
         s_addr->sin6_port = htons(v->ep_port);
-        sock = socket(AF_INET6, SOCK_DGRAM, 0);
+        v->conn = socket(AF_INET6, SOCK_DGRAM, 0);
     }
 
-    if (sock < 0)
-        return sock;
+    return v->conn;
+    /*
     if (bind(sock, (struct sockaddr *) &_s_addr, socksize) < 0) {
         close(sock);
         return -1;
     }
-    return sock;
+    */
 }
 
 void vpn_socket_close(struct vpn_socket *v)

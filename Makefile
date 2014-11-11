@@ -1,5 +1,5 @@
 CC:=gcc
-CFLAGS= -Wall -I lib/libevquick -I.
+CFLAGS= -Wall -I lib/libevquick -I. -ggdb
 SYSTEM?=posix
 CRYPTO?=none
 SERVER?=n

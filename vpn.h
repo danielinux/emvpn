@@ -3,6 +3,8 @@
 #ifndef VPN_H_INC
 #define VPN_H_INC
 
+#define VPN_DEFAULT_PORT 1294
+
 /****************************
  * Compiler selection
  */
@@ -202,6 +204,9 @@ int vpn_decrypt(struct vpn_socket *v, uint8_t *to, uint8_t *from, int len);
 int vpn_get_key(char *username, struct vpn_key *key);
 int vpn_get_ipconf(char *username, union vpn_ipconfig *ipconf);
 int vpn_random(uint8_t *buf, int len);
+
+/* APP api */
+struct vpn_socket *vpn_client(uint16_t ip_version, void *addr, uint16_t port, char *user, struct vpn_key *k);
 
 
 #endif
