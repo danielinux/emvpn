@@ -32,7 +32,7 @@ endif
 
 all: posix
 
-posix: vpn_client vpn_server
+posix: emvpn_client emvpn_server
 
 crypto_none.o: crypto/crypto_none.c
 	gcc -c -o $@ $^ $(CFLAGS)
@@ -40,10 +40,10 @@ crypto_none.o: crypto/crypto_none.c
 sys_posix.o: sys/sys_posix.c
 	gcc -c -o $@ $^ $(CFLAGS)
 
-vpn_client: vpn.o linux_main.o libevquick.o $(OBJ) 
+emvpn_client: emvpn.o linux_main.o libevquick.o $(OBJ) 
 	gcc -o $@ $^
 
-vpn_server: vpn.o linux_main.o libevquick.o $(OBJ) 
+emvpn_server: emvpn.o linux_main.o libevquick.o $(OBJ) 
 	gcc -o $@ $^
 
 libevquick.o: lib/libevquick/libevquick.c
@@ -51,4 +51,4 @@ libevquick.o: lib/libevquick/libevquick.c
 
 
 clean:
-	rm -f *.o vpn_server vpn_client
+	rm -f *.o emvpn_server emvpn_client

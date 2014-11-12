@@ -1,0 +1,374 @@
+#include "emvpn.h"
+
+/* Data methods / generic fn */
+static void emvpn_data(struct emvpn_socket *sck, void *data, int len) 
+{
+
+}
+
+static void emvpn_statetimer_add(struct emvpn_socket *v)
+{
+    uint64_t tlapse = (VPN_TIMER_HANDSHAKE << (uint64_t)v->timer_retry);
+    if (v->state == VPN_CLIENT_CONNECTED || v->state == VPN_SERVER_CONNECTED)
+        tlapse = VPN_TIMER_KEEPALIVE;
+    emvpn_timer_add(v, tlapse);
+}
+
+static int emvpn_dgram_send(struct emvpn_socket *v, enum emvpn_msgtype type, void *data, int len)
+{
+    struct emvpn_packet *pkt;
+    uint16_t tot_len;
+
+    if (len > 65535)
+        return -1;
+    
+    tot_len = (uint16_t)len + (uint16_t)sizeof(struct emvpn_packet_msg);
+
+    pkt = emvpn_alloc(tot_len);
+    if (!pkt)
+        return -1;
+
+    pkt->vp_msg.type = emvpn_htons((uint16_t)(type & 0xFFFF));
+    pkt->vp_msg.tot_len = emvpn_htons(tot_len);
+
+    if (data)
+        memcpy(pkt->vp_payload.vp_raw, data, len);
+
+    return emvpn_socket_send(v, pkt, tot_len);
+}
+
+/* Server */
+
+struct emvpn_session *vlist = NULL;
+
+static void vlist_add(struct emvpn_session *v)
+{
+    if (!vlist)
+        vlist = v;
+    else {
+        v->next = vlist;
+        vlist = v;
+    }
+}
+
+static void vlist_del(struct emvpn_session *v)
+{
+    struct emvpn_session *cur = vlist, *prev = NULL;
+    while(cur) {
+        if (cur == v) {
+            if (prev)
+                prev->next = cur->next;
+            else
+                vlist = cur->next;
+            emvpn_free(cur);
+            break;
+        }
+        prev = cur;
+        cur = cur->next; 
+    }
+}
+
+static struct emvpn_session *new_session(char *user, uint16_t ipver, void *addr, uint16_t port)
+{
+    struct emvpn_session *vs;
+    vs = emvpn_alloc(sizeof(struct emvpn_session));
+    if (!vs)
+        return NULL;
+
+    strncpy(vs->sock->user, user, VPN_MAX_USER);
+    emvpn_get_key(vs->sock->user, &vs->sock->key);
+    emvpn_get_ipconf(vs->sock->user, &vs->ipconf);
+
+    /* Alloc new socket */
+    vs->sock = emvpn_alloc(sizeof(struct emvpn_socket));
+    if (!vs->sock) {
+        emvpn_free(vs);
+        return NULL;
+    }
+
+    vs->sock->ep_ipver = ipver;
+    vs->sock->ep_port = port;
+    memcpy(vs->sock->ep_addr, addr, (ipver == 4)?4:16);
+    if (emvpn_socket_connect(vs->sock) < 0)  {
+        emvpn_free(vs->sock);
+        emvpn_free(vs);
+        return NULL;
+    }
+    vs->sock->timer_retry = 0;
+    vs->sock->session = vs;
+    memcpy(vs->sock->user, user, VPN_MAX_USER);
+    vlist_add(vs);
+    return vs;
+}
+
+static void emvpn_send_challenge(struct emvpn_session *vs)
+{
+    uint8_t challenge[VPN_CHALLENGE_SIZE]; 
+    vs->sock->state = VPN_STALE;
+
+    if (emvpn_random(challenge, VPN_CHALLENGE_SIZE) < 0)
+        return;
+
+    vs->challenge = emvpn_alloc(VPN_CHALLENGE_SIZE);
+    if (!vs->challenge)
+        return;
+
+    if (emvpn_encrypt(vs->sock, vs->challenge, challenge, VPN_CHALLENGE_SIZE) == VPN_CHALLENGE_SIZE) {
+        if (emvpn_dgram_send(vs->sock, VM_CHALLENGE, challenge, VPN_CHALLENGE_SIZE) > 0)
+            vs->sock->state = VPN_CHALLENGE_SENT;
+    }
+}
+
+static void emvpn_login(struct emvpn_socket *sck, void *data, int len)
+{
+    struct emvpn_session *vs = sck->session;
+    if (vs)
+        emvpn_send_challenge(vs);
+    emvpn_statetimer_add(vs->sock);
+}
+
+static void emvpn_response(struct emvpn_socket *sck, void *data, int len)
+{
+    struct emvpn_packet *pkt = (struct emvpn_packet *) data;
+    struct emvpn_session *vs;
+    
+    vs = sck->session;
+    if (!vs)
+        return;
+    if (memcmp(vs->challenge, pkt->vp_payload.vp_challenge, VPN_CHALLENGE_SIZE) == 0) {
+        if (emvpn_dgram_send(sck, VM_AUTH_OK, NULL, 0) > 0)
+            sck->state = VPN_SERVER_CONNECTED;
+        else
+            sck->state = VPN_STALE;
+    }
+    emvpn_free(vs->challenge);
+    vs->challenge = NULL;
+    emvpn_statetimer_add(vs->sock);
+}
+
+static void emvpn_rst(struct emvpn_socket *sck, void *data, int len)
+{
+    struct emvpn_session *vs;
+    vs = sck->session;
+    if (vs && vs->challenge) {
+        emvpn_free(vs->challenge);
+        vs->challenge = NULL;
+    }
+    sck->state = VPN_STALE;
+    emvpn_statetimer_add(vs->sock);
+}
+
+static void emvpn_timeout_srv(struct emvpn_socket *v, uint64_t now)
+{
+    struct emvpn_session *vs;
+    if (v->state == VPN_STALE) {
+        vs = v->session;
+        if (vs) {
+            vlist_del(vs);
+        }
+        emvpn_free(v);
+        return;
+    }
+    if (++v->timer_retry > VPN_MAX_RETRIES) {
+        v->state = VPN_STALE;
+    }
+    if (v->state == VPN_SERVER_CONNECTED)
+        emvpn_dgram_send(v, VM_KEEPALIVE, NULL, 0);
+    emvpn_statetimer_add(v);
+}
+
+
+
+/* Client */
+
+static void emvpn_ipconf(struct emvpn_socket *sck, void *data, int len)
+{
+    /* TODO: add SYSTEM function ... */
+
+}
+
+static void emvpn_challenge(struct emvpn_socket *v, void *data, int len)
+{
+    struct emvpn_packet *pkt = (struct emvpn_packet *)data;
+    uint8_t response[VPN_CHALLENGE_SIZE];
+
+    if (emvpn_encrypt(v, response, pkt->vp_payload.vp_challenge, VPN_CHALLENGE_SIZE) == VPN_CHALLENGE_SIZE) {
+        if (emvpn_dgram_send(v, VM_RESPONSE, response, VPN_CHALLENGE_SIZE) > 0)
+            v->state = VPN_RESPONSE_SENT;
+        else
+            v->state = VPN_IDLE;
+    }
+    emvpn_statetimer_add(v);
+}
+
+static void emvpn_ka(struct emvpn_socket *v, void *data, int len)
+{
+    /* Receive a keepalive. */
+    v->timer_retry = 0;
+}
+
+static void emvpn_auth_ok(struct emvpn_socket *v, void *data, int len)
+{
+    v->timer_retry = 0;
+    v->state = VPN_CLIENT_CONNECTED;
+    emvpn_statetimer_add(v); /* Schedule keepalives */
+}
+
+
+static int emvpn_send_login(struct emvpn_socket *v)
+{
+    v->state = VPN_IDLE;
+    if (emvpn_dgram_send(v, VM_LOGIN, v->user, strlen(v->user)) > 0) {
+        v->state = VPN_LOGIN_SENT;
+        return 0;
+    }
+    return -1;
+}
+
+static void emvpn_auth_deny(struct emvpn_socket *v, void *data, int len)
+{
+    v->timer_retry = 0;
+    emvpn_send_login(v);
+    emvpn_statetimer_add(v); /* Schedule keepalives */
+}
+
+static void emvpn_timeout_cli(struct emvpn_socket *v, uint64_t now)
+{
+    if (++v->timer_retry > VPN_MAX_RETRIES) {
+        v->timer_retry = 0;
+        emvpn_send_login(v);
+        emvpn_statetimer_add(v);
+        /* Connection timed out, at any stage.
+         * Restart from login.
+         */
+        return;
+    }
+    switch(v->state) {
+        case VPN_IDLE:
+        case VPN_LOGIN_SENT:
+            emvpn_send_login(v); 
+            /* fall through to activate timer */
+        case VPN_RESPONSE_SENT:
+            emvpn_statetimer_add(v);
+            break;
+        case VPN_CLIENT_CONNECTED:
+            emvpn_dgram_send(v, VM_KEEPALIVE, NULL, 0);
+            /* Fall through */
+        default:
+            emvpn_statetimer_add(v);
+    }
+}
+
+void emvpn_core_data_dispose(uint8_t *data)
+{
+    uint8_t *origin;
+    if (!data)
+        return; 
+
+    origin = (data - (sizeof(struct emvpn_packet_msg) + sizeof(struct vp_data)));
+    emvpn_free(origin);
+}
+
+struct emvpn_socket *emvpn_client(uint16_t ip_version, void *addr, uint16_t port, char *user, struct emvpn_key *k)
+{
+    struct emvpn_socket *v = emvpn_alloc(sizeof(struct emvpn_socket));
+    if (!v)
+        return NULL;
+    memcpy(&v->key, k, sizeof(struct emvpn_key));
+    v->ep_ipver = ip_version;
+    v->ep_port = port;
+    memcpy(v->ep_addr, addr, (ip_version == 4)?4:16);
+    if (emvpn_socket_connect(v) < 0)  {
+        emvpn_free(v);
+        return NULL;
+    }
+    v->timer_retry = 0;
+    memcpy(v->user, user, VPN_MAX_USER);
+    if ((emvpn_send_login(v) < 0)) {
+        emvpn_free(v);
+        return NULL;
+    }
+    emvpn_statetimer_add(v);
+    return v;
+}
+
+struct emvpn_fsm_event {
+    enum emvpn_state st;
+    void (*ev_call[VM_TYPE_MAX])(struct emvpn_socket *sck, void *data, int len);
+    void (*ev_timeout)(struct emvpn_socket *sck, uint64_t now);
+};
+
+
+struct emvpn_fsm_event emvpn_fsm[VPN_STATE_MAX] = {
+/* { STATE                 { LOGIN   CHALLENGE       RESPONSE    AUTH_OK         DENY            IP_CONF     KA      DATA         RST     },   TIMEOUT         }*/
+   { VPN_LOGIN_SENT,       { NULL,   emvpn_challenge,  NULL,       NULL,           NULL,           NULL,       NULL,   NULL,        NULL    }, emvpn_timeout_cli   },
+   { VPN_RESPONSE_SENT,    { NULL,   NULL,           NULL,       emvpn_auth_ok,    emvpn_auth_deny,  NULL,       NULL,   NULL,        NULL    }, emvpn_timeout_cli   },
+   { VPN_CLIENT_CONNECTED, { NULL,   NULL,           NULL,       NULL,           NULL,           emvpn_ipconf, emvpn_ka, emvpn_data,    NULL    }, emvpn_timeout_cli   },
+   { VPN_IDLE,             {                                                                                                              }, emvpn_timeout_cli   },
+   { VPN_LISTEN,           { emvpn_login, NULL,        NULL,       NULL,           NULL,           NULL,       NULL,   NULL,        NULL    }, emvpn_timeout_srv   },
+   { VPN_CHALLENGE_SENT,   { NULL,      NULL,        emvpn_response,   NULL,       NULL,           NULL,       NULL,   NULL,        emvpn_rst }, emvpn_timeout_srv   },
+   { VPN_STALE,            { NULL,      NULL,        NULL,           NULL,       NULL,           NULL,       NULL,   NULL,        emvpn_rst }, emvpn_timeout_srv   },
+   { VPN_SERVER_CONNECTED, { NULL,      NULL,        NULL,           NULL,       NULL,           NULL,       emvpn_ka, emvpn_data,    NULL    }, emvpn_timeout_srv   }
+};
+
+
+/* Public interface */
+void emvpn_core_timer_callback(struct emvpn_socket *v)
+{
+    if (emvpn_fsm[v->state].ev_timeout)
+        emvpn_fsm[v->state].ev_timeout(v, emvpn_time());
+}
+
+void emvpn_core_socket_err(struct emvpn_socket *v)
+{
+    emvpn_socket_close(v);
+    v->priv = NULL;
+    v->conn = -1;
+    if (IS_SERVER(v)) {
+        v->state = VPN_STALE;
+    } else {
+        v->state = VPN_IDLE;
+    }
+}
+
+static uint8_t pkt_buf[VPN_MAX_PKT];
+void emvpn_core_socket_recv(struct emvpn_socket *v)
+{
+    int ret;
+    uint16_t netver, port;
+    uint8_t addr[16];
+    struct emvpn_packet *pkt = (struct emvpn_packet *) pkt_buf;
+    uint16_t pkt_type;
+
+    if (v) {
+        ret = emvpn_socket_recvfrom(v, pkt_buf, VPN_MAX_PKT, &netver, addr, &port); 
+        if (ret <= 0) {
+            emvpn_core_socket_error(v);
+            return;
+        }
+        pkt_type = emvpn_ntohs(pkt->vp_msg.type);
+        if (pkt_type > VM_TYPE_MAX)
+            return;
+
+        if (v->state == VPN_LISTEN) {
+            struct emvpn_session *vs;
+            vs = new_session(pkt->vp_payload.vp_login, netver, addr, port);
+            vs->sock->conn = v->conn;
+            vs->sock->priv = v->priv;
+            v = vs->sock;
+        }
+        /* Sanity address check against stored endpoint */
+        if (v->ep_ipver == netver && v->ep_port == port && memcmp(v->ep_addr, addr, (netver == 4)?4:16) == 0) {
+            /* Check if packet type is acceptable for the current state, and call the function */
+            if (emvpn_fsm[v->state].ev_call[pkt_type]) {
+                emvpn_timer_defuse(v);
+                emvpn_fsm[v->state].ev_call[pkt_type](v, pkt_buf, ret);
+            }
+        }
+    }
+}
+
+void emvpn_core_socket_error(struct emvpn_socket *v)
+{
+
+}

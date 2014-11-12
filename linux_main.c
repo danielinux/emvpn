@@ -1,4 +1,4 @@
-#include "vpn.h"
+#include "emvpn.h"
 #include <stdio.h>
 #include <libevquick.h>
 #include <sys/socket.h>
@@ -9,26 +9,26 @@
 
 #ifdef VPN_SERVER
 
-static struct vpn_key secret = {
+static struct emvpn_key secret = {
     "01234567890123456789012345678901",
     "6789012345678901"
 };
 
-int vpn_get_key(char *user, struct vpn_key *key)
+int emvpn_get_key(char *user, struct emvpn_key *key)
 {
     const uint8_t secret[VPN_KEY_LEN] = "01234567890123456789012345678901";
-    memcpy(key, secret, sizeof(struct vpn_key));
+    memcpy(key, secret, sizeof(struct emvpn_key));
     return 0;
 }
 
-int vpn_get_ipconf(char *user, union vpn_ipconfig *ipconf)
+int emvpn_get_ipconf(char *user, union emvpn_ipconfig *ipconf)
 {
     return -1;
 }
 #endif
 
 int is_server = 0;
-struct vpn_socket *sock;
+struct emvpn_socket *sock;
 
 void usage(char *prg)
 {
@@ -38,14 +38,14 @@ void usage(char *prg)
 
 static void client_cb(int fd, short rev, void *arg)
 {
-    struct vpn_socket *v = (struct vpn_socket *)arg;
-    vpn_core_socket_recv(v);
+    struct emvpn_socket *v = (struct emvpn_socket *)arg;
+    emvpn_core_socket_recv(v);
 }
 
 static void client_err_cb(int fd, short rev, void *arg)
 {
-    struct vpn_socket *v = (struct vpn_socket *)arg;
-    vpn_core_socket_error(v);
+    struct emvpn_socket *v = (struct emvpn_socket *)arg;
+    emvpn_core_socket_error(v);
 }
 
 static void client(int argc, char *argv[])
@@ -65,7 +65,7 @@ static void client(int argc, char *argv[])
     if (inet_aton(argv[1], (struct in_addr *)&addr) < 0)
         exit(2);
 
-    sock = vpn_client(4, &addr, port, "test", &secret);
+    sock = emvpn_client(4, &addr, port, "test", &secret);
     evquick_addevent(sock->conn, EVQUICK_EV_READ, client_cb, client_err_cb, sock);
 }
 
@@ -77,7 +77,7 @@ static void server(int argc, char *argv[])
 
 int main(int argc, char *argv[])
 {
-    if (strcmp(argv[0], "vpn_server") == 0)
+    if (strcmp(argv[0], "emvpn_server") == 0)
         is_server = 1;
 
     evquick_init();

@@ -1,5 +1,5 @@
-vpn_client
-vpn_server
+emvpn_client
+emvpn_server
 *.o
 *.a
 tags

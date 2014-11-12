@@ -18,7 +18,7 @@
 #   define DEF_PACKED_UNION  union /* No need to pack unions in GCC */
 #endif
 
-enum vpn_state {
+enum emvpn_state {
     /* client */
     VPN_LOGIN_SENT = 0,
     VPN_RESPONSE_SENT,
@@ -33,7 +33,7 @@ enum vpn_state {
     VPN_STATE_MAX
 };
 
-enum vpn_msgtype {
+enum emvpn_msgtype {
     VM_LOGIN = 0,
     VM_CHALLENGE,
     VM_RESPONSE,
@@ -79,18 +79,18 @@ DEF_PACKED_STRUCT vpip_ipv6
     uint8_t ip6_dns[16];
 };
 
-DEF_PACKED_UNION vpn_ipconfig {
+DEF_PACKED_UNION emvpn_ipconfig {
     struct vpip_ipv4 vp_ipv4;
     struct vpip_ipv6 vp_ipv6;
 };
 
 
-DEF_PACKED_STRUCT vpn_packet {
-    DEF_PACKED_STRUCT vpn_packet_msg {
+DEF_PACKED_STRUCT emvpn_packet {
+    DEF_PACKED_STRUCT emvpn_packet_msg {
         uint16_t type;
         uint16_t tot_len;
     } vp_msg;
-    DEF_PACKED_UNION vpn_packet_payload {
+    DEF_PACKED_UNION emvpn_packet_payload {
         uint8_t vp_raw[0];
         char    vp_login[0];
         uint8_t vp_challenge[VPN_CHALLENGE_SIZE];
@@ -104,42 +104,42 @@ DEF_PACKED_STRUCT vpn_packet {
             uint8_t  vpd_data[0];
         } vp_data;
         DEF_PACKED_STRUCT vp_ipconfig {
-            union vpn_ipconfig ipconf;
+            union emvpn_ipconfig ipconf;
             uint8_t            signature[VPN_SIGNATURE_SIZE];
         } vp_ipconf;
     } vp_payload;
 };
 
-struct vpn_socket;
+struct emvpn_socket;
 
 
-struct vpn_session {
-    struct vpn_socket *sock;
-    union vpn_ipconfig ipconf;
+struct emvpn_session {
+    struct emvpn_socket *sock;
+    union emvpn_ipconfig ipconf;
     uint8_t *challenge;
-    struct vpn_session *next;
+    struct emvpn_session *next;
 };
 
-struct vpn_key {
+struct emvpn_key {
     uint8_t key[VPN_KEY_LEN];
     uint8_t  iv[VPN_IV_LEN];
 };
 
-struct vpn_socket {
+struct emvpn_socket {
     int                 conn;
     void                *priv;
     char                user[VPN_MAX_USER];
-    enum vpn_state      state;
+    enum emvpn_state      state;
     void                *timer;
     int                 timer_retry;
-    struct vpn_key       key;
+    struct emvpn_key       key;
     uint8_t             ep_addr[VPN_MAX_ADDR];
     uint16_t            ep_port;
     uint16_t            ep_ipver;
-    int                 (*vpn_recv)(void *arg, uint8_t *data, int len);
-    void                *vpn_recv_arg;
-    struct vpn_session  *session;
-    struct vpn_socket   *next;
+    int                 (*emvpn_recv)(void *arg, uint8_t *data, int len);
+    void                *emvpn_recv_arg;
+    struct emvpn_session  *session;
+    struct emvpn_socket   *next;
 };
 
 
@@ -148,14 +148,14 @@ struct vpn_socket {
 #define IS_SERVER(v) (((v)->state > VPN_IDLE))
 
 #define VPN_CHECK_MSG(v, type) { \
-    if (vpn_ntohs((v)->vp_msg.type) != type) \
+    if (emvpn_ntohs((v)->vp_msg.type) != type) \
         return -1; \
 }
 
 #define VPN_CHECK_SIZE(v, tot_len, msg_len) { \
-    if (vpn_ntohs((v)->vp_msg.tot_len) != tot_len) \
+    if (emvpn_ntohs((v)->vp_msg.tot_len) != tot_len) \
         return -1; \
-    if (msg_len && msg_len != (vpn_ntohs(v)->vp_msg.tot_len - sizeof(struct vpn_packet_msg))) \
+    if (msg_len && msg_len != (emvpn_ntohs(v)->vp_msg.tot_len - sizeof(struct emvpn_packet_msg))) \
         return -2; \
 }
 
@@ -163,50 +163,50 @@ struct vpn_socket {
 /* SYSTEM interface.  A system should implement these. */
 
 /* Allocator */
-void *vpn_alloc(int x);
-void vpn_free(void *x);
+void *emvpn_alloc(int x);
+void emvpn_free(void *x);
 
 /* Time function: return elapsed milliseconds */
-uint64_t vpn_time(void);
+uint64_t emvpn_time(void);
 
 /* Time management */
-void vpn_timer_add(struct vpn_socket *v, uint64_t count);
-void vpn_timer_defuse(struct vpn_socket *v);
+void emvpn_timer_add(struct emvpn_socket *v, uint64_t count);
+void emvpn_timer_defuse(struct emvpn_socket *v);
 /* Internal function: do not define this, call back in case of timer expiration */
-void vpn_core_timer_callback(struct vpn_socket *v);
+void emvpn_core_timer_callback(struct emvpn_socket *v);
 
-int vpn_socket_connect(struct vpn_socket *v);
-int vpn_socket_listen(struct vpn_socket *v);
-int vpn_socket_send(struct vpn_socket *v, void *pkt, int len);
-int vpn_socket_recvfrom(struct vpn_socket *v, void *pkt, int len, uint16_t *family, void *addr, uint16_t *port);
-void vpn_socket_close(struct vpn_socket *v);
+int emvpn_socket_connect(struct emvpn_socket *v);
+int emvpn_socket_listen(struct emvpn_socket *v);
+int emvpn_socket_send(struct emvpn_socket *v, void *pkt, int len);
+int emvpn_socket_recvfrom(struct emvpn_socket *v, void *pkt, int len, uint16_t *family, void *addr, uint16_t *port);
+void emvpn_socket_close(struct emvpn_socket *v);
 
 /* Core calls: inform VPN about socket events */
-void vpn_core_socket_recv(struct vpn_socket *v);
-void vpn_core_socket_error(struct vpn_socket *v);
-void vpn_core_data_dispose(uint8_t *data);
-void vpn_core_send(struct vpn_socket *v, uint8_t *data, int len);
+void emvpn_core_socket_recv(struct emvpn_socket *v);
+void emvpn_core_socket_error(struct emvpn_socket *v);
+void emvpn_core_data_dispose(uint8_t *data);
+void emvpn_core_send(struct emvpn_socket *v, uint8_t *data, int len);
 
 
-uint16_t vpn_ntohs(uint16_t);
-uint16_t vpn_htons(uint16_t);
-uint32_t vpn_ntohl(uint32_t);
-uint32_t vpn_htohl(uint32_t);
+uint16_t emvpn_ntohs(uint16_t);
+uint16_t emvpn_htons(uint16_t);
+uint32_t emvpn_ntohl(uint32_t);
+uint32_t emvpn_htohl(uint32_t);
 
 /* CRYPTO interface */
-int vpn_encrypt(struct vpn_socket *v, uint8_t *to, uint8_t *from, int len);
-int vpn_decrypt(struct vpn_socket *v, uint8_t *to, uint8_t *from, int len);
+int emvpn_encrypt(struct emvpn_socket *v, uint8_t *to, uint8_t *from, int len);
+int emvpn_decrypt(struct emvpn_socket *v, uint8_t *to, uint8_t *from, int len);
 
 
 /* SERVER APP interface */
 
-/* Server DB calls: to be implemented if running a vpn server */
-int vpn_get_key(char *username, struct vpn_key *key);
-int vpn_get_ipconf(char *username, union vpn_ipconfig *ipconf);
-int vpn_random(uint8_t *buf, int len);
+/* Server DB calls: to be implemented if running a emvpn server */
+int emvpn_get_key(char *username, struct emvpn_key *key);
+int emvpn_get_ipconf(char *username, union emvpn_ipconfig *ipconf);
+int emvpn_random(uint8_t *buf, int len);
 
 /* APP api */
-struct vpn_socket *vpn_client(uint16_t ip_version, void *addr, uint16_t port, char *user, struct vpn_key *k);
+struct emvpn_socket *emvpn_client(uint16_t ip_version, void *addr, uint16_t port, char *user, struct emvpn_key *k);
 
 
 #endif
