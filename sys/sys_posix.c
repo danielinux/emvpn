@@ -120,6 +120,40 @@ int emvpn_socket_connect(struct emvpn_socket *v)
     */
 }
 
+int emvpn_socket_listen(struct emvpn_socket *v, uint16_t ip_ver, void *addr, uint16_t port)
+{
+
+    struct sockaddr_storage _s_addr;
+    unsigned long socksize = 0;
+    memset(&_s_addr, 0, sizeof(_s_addr));
+    errno = EINVAL;
+
+
+    if (ip_ver == 4) {
+        struct sockaddr_in *s_addr = (struct sockaddr_in *) &_s_addr;
+        socksize = sizeof(struct sockaddr_in);
+        s_addr->sin_family = AF_INET;
+        memcpy(&s_addr->sin_addr.s_addr, addr, sizeof(struct in_addr));
+        s_addr->sin_port = htons(port);
+        v->conn = socket(AF_INET, SOCK_DGRAM, 0);
+    }
+
+    if (ip_ver == 6) {
+        struct sockaddr_in6 *s_addr = (struct sockaddr_in6 *) &_s_addr;
+        socksize = sizeof(struct sockaddr_in6);
+        s_addr->sin6_family = AF_INET6;
+        memcpy(&s_addr->sin6_addr, addr, sizeof(struct in6_addr));
+        s_addr->sin6_port = htons(port);
+        v->conn = socket(AF_INET6, SOCK_DGRAM, 0);
+    }
+
+    if (bind(v->conn, (struct sockaddr *) &_s_addr, socksize) < 0) {
+        close(v->conn);
+        return -1;
+    }
+    return v->conn;
+}
+
 void emvpn_socket_close(struct emvpn_socket *v)
 {
     close(v->conn);

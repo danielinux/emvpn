@@ -39,8 +39,8 @@ enum emvpn_msgtype {
     VM_RESPONSE,
     VM_AUTH_OK,
     VM_AUTH_DENY,
-    VM_KEEPALIVE,
     VM_IPCONFIG,
+    VM_KEEPALIVE,
     VM_DATA,
     VM_RESET,
     VM_TYPE_MAX
@@ -176,7 +176,7 @@ void emvpn_timer_defuse(struct emvpn_socket *v);
 void emvpn_core_timer_callback(struct emvpn_socket *v);
 
 int emvpn_socket_connect(struct emvpn_socket *v);
-int emvpn_socket_listen(struct emvpn_socket *v);
+int emvpn_socket_listen(struct emvpn_socket *v, uint16_t ip_ver, void *addr, uint16_t port);
 int emvpn_socket_send(struct emvpn_socket *v, void *pkt, int len);
 int emvpn_socket_recvfrom(struct emvpn_socket *v, void *pkt, int len, uint16_t *family, void *addr, uint16_t *port);
 void emvpn_socket_close(struct emvpn_socket *v);
@@ -207,6 +207,7 @@ int emvpn_random(uint8_t *buf, int len);
 
 /* APP api */
 struct emvpn_socket *emvpn_client(uint16_t ip_version, void *addr, uint16_t port, char *user, struct emvpn_key *k);
+struct emvpn_socket *emvpn_server(uint16_t ip_version, void *addr, uint16_t port);
 
 
 #endif

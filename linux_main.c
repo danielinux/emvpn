@@ -6,6 +6,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
+#include <libgen.h> /* basename() */
 
 #ifdef VPN_SERVER
 
@@ -36,13 +37,13 @@ void usage(char *prg)
     exit(6);
 }
 
-static void client_cb(int fd, short rev, void *arg)
+static void socket_cb(int fd, short rev, void *arg)
 {
     struct emvpn_socket *v = (struct emvpn_socket *)arg;
     emvpn_core_socket_recv(v);
 }
 
-static void client_err_cb(int fd, short rev, void *arg)
+static void socket_err_cb(int fd, short rev, void *arg)
 {
     struct emvpn_socket *v = (struct emvpn_socket *)arg;
     emvpn_core_socket_error(v);
@@ -66,18 +67,35 @@ static void client(int argc, char *argv[])
         exit(2);
 
     sock = emvpn_client(4, &addr, port, "test", &secret);
-    evquick_addevent(sock->conn, EVQUICK_EV_READ, client_cb, client_err_cb, sock);
+    if (!sock) {
+        perror("Starting VPN client");
+        exit(1);
+    }
+    evquick_addevent(sock->conn, EVQUICK_EV_READ, socket_cb, socket_err_cb, sock);
 }
 
 static void server(int argc, char *argv[])
 {
-    exit(1);
+    uint32_t addr = 0;
+    uint16_t port = VPN_DEFAULT_PORT;
+
+    printf("Starting server\n");
+
+    if (argc > 1)
+        port = atoi(argv[1]);
+
+    sock = emvpn_server(4, &addr, port);
+    if (!sock) {
+        perror("Starting VPN server");
+        exit(1);
+    }
+    evquick_addevent(sock->conn, EVQUICK_EV_READ, socket_cb, socket_err_cb, sock);
 
 }
 
 int main(int argc, char *argv[])
 {
-    if (strcmp(argv[0], "emvpn_server") == 0)
+    if (strcmp(basename(argv[0]), "emvpn_server") == 0)
         is_server = 1;
 
     evquick_init();
