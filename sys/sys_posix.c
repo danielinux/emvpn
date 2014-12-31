@@ -9,34 +9,35 @@
 #include <fcntl.h>
 #include "emvpn.h"
 
-void *emvpn_alloc(int x){
+void *posix_alloc(int x){
    return calloc(1, x);
 }
-void emvpn_free(void *x) {
+
+void posix_free(void *x) {
     free(x);
 }
 
-uint16_t emvpn_ntohs(uint16_t x)
+uint16_t posix_ntohs(uint16_t x)
 {
     return ntohs(x);
 }
 
-uint16_t emvpn_htons(uint16_t x)
+uint16_t posix_htons(uint16_t x)
 {
     return htons(x);
 }
 
-uint32_t emvpn_ntohl(uint32_t x)
+uint32_t posix_ntohl(uint32_t x)
 {
     return ntohl(x);
 }
 
-uint32_t emvpn_htohl(uint32_t x)
+uint32_t posix_htohl(uint32_t x)
 {
     return htonl(x);
 }
 
-int emvpn_socket_send(struct emvpn_socket *v, void *pkt, int len)
+int posix_socket_send(struct emvpn_socket *v, void *pkt, int len)
 {
     struct sockaddr_storage _s_addr;
     int socksize;
@@ -62,7 +63,7 @@ int emvpn_socket_send(struct emvpn_socket *v, void *pkt, int len)
     return sendto(v->conn, pkt, len, 0, (struct sockaddr *)&_s_addr, socksize);
 }
 
-int emvpn_socket_recvfrom(struct emvpn_socket *v, void *pkt, int len, uint16_t *family, void *addr, uint16_t *port)
+int posix_socket_recvfrom(struct emvpn_socket *v, void *pkt, int len, uint16_t *family, void *addr, uint16_t *port)
 {
     struct sockaddr_storage _s_addr;
     int ret;
@@ -74,12 +75,12 @@ int emvpn_socket_recvfrom(struct emvpn_socket *v, void *pkt, int len, uint16_t *
     if (socksize == sizeof(struct sockaddr_in)) {
         struct sockaddr_in *s_addr = (struct sockaddr_in *) &_s_addr;
         memcpy(addr, &s_addr->sin_addr.s_addr, 4);
-        *port = emvpn_ntohs(s_addr->sin_port);
+        *port = ntohs(s_addr->sin_port);
         *family = 4;
     } else if (socksize == sizeof(struct sockaddr_in6)) {
         struct sockaddr_in6 *s_addr = (struct sockaddr_in6 *) &_s_addr;
         memcpy(addr, &s_addr->sin6_addr, 16);
-        *port = emvpn_ntohs(s_addr->sin6_port);
+        *port = ntohs(s_addr->sin6_port);
         *family = 6;
     } else {
         return -1;
@@ -87,7 +88,7 @@ int emvpn_socket_recvfrom(struct emvpn_socket *v, void *pkt, int len, uint16_t *
     return ret;
 }
 
-int emvpn_socket_connect(struct emvpn_socket *v)
+int posix_socket_connect(struct emvpn_socket *v)
 {
     struct sockaddr_storage _s_addr;
     memset(&_s_addr, 0, sizeof(_s_addr));
@@ -120,7 +121,7 @@ int emvpn_socket_connect(struct emvpn_socket *v)
     */
 }
 
-int emvpn_socket_listen(struct emvpn_socket *v, uint16_t ip_ver, void *addr, uint16_t port)
+int posix_socket_listen(struct emvpn_socket *v, uint16_t ip_ver, void *addr, uint16_t port)
 {
 
     struct sockaddr_storage _s_addr;
@@ -154,13 +155,13 @@ int emvpn_socket_listen(struct emvpn_socket *v, uint16_t ip_ver, void *addr, uin
     return v->conn;
 }
 
-void emvpn_socket_close(struct emvpn_socket *v)
+void posix_socket_close(struct emvpn_socket *v)
 {
     close(v->conn);
     v->conn = -1;
 }
 
-int emvpn_random(uint8_t *data, int len)
+int posix_random(uint8_t *data, int len)
 {
     int fd = open("/dev/urandom", O_RDONLY);
     int r;
@@ -180,18 +181,18 @@ static void posix_emvpn_timer_callback(void *arg)
 }
 
 
-void emvpn_timer_add(struct emvpn_socket *v, uint64_t count)
+void posix_timer_add(struct emvpn_socket *v, uint64_t count)
 {
     v->timer = evquick_addtimer(count, 0, posix_emvpn_timer_callback, v);
 }
 
-void emvpn_timer_defuse(struct emvpn_socket *v)
+void posix_timer_defuse(struct emvpn_socket *v)
 {
     evquick_deltimer(v->timer);
     v->timer = NULL;
 }
 
-uint64_t emvpn_time(void)
+uint64_t posix_time(void)
 {
 	struct timeval tv;
 	unsigned long long ret;
@@ -200,3 +201,27 @@ uint64_t emvpn_time(void)
 	ret += (unsigned long long)tv.tv_usec / 1000ULL;
 	return ret;
 }
+
+
+int posix_init(void)
+{
+    struct emvpn_sys posix = {
+        .alloc = posix_alloc,
+        .free = posix_free,
+        .time = posix_time,
+        .timer_add = posix_timer_add,
+        .timer_defuse = posix_timer_defuse,
+        .socket_connect = posix_socket_connect,
+        .socket_listen = posix_socket_listen,
+        .socket_send = posix_socket_send,
+        .socket_recvfrom = posix_socket_recvfrom,
+        .socket_close = posix_socket_close,
+        .ntohs = posix_ntohs,
+        .htons = posix_htons,
+        .ntohl = posix_ntohl,
+        .htohl = posix_htohl
+    };
+    return emvpn_sys_setup(&posix);
+}
+
+

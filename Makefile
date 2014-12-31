@@ -6,7 +6,7 @@ SERVER?=n
 
 
 ifeq ($(SYSTEM),posix)
-   OBJ+=sys_posix.o
+   OBJ+=sys_posix.o drv_tap.o
    SERVER=y
 endif
 
@@ -38,6 +38,9 @@ crypto_none.o: crypto/crypto_none.c
 	gcc -c -o $@ $^ $(CFLAGS)
 
 sys_posix.o: sys/sys_posix.c
+	gcc -c -o $@ $^ $(CFLAGS)
+
+drv_tap.o: sys/drv_tap.c
 	gcc -c -o $@ $^ $(CFLAGS)
 
 emvpn_client: emvpn.o linux_main.o libevquick.o $(OBJ) 
