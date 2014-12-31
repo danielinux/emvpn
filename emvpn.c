@@ -225,10 +225,10 @@ static void emvpn_send_data(struct emvpn_socket *sck, void *data, int len)
     struct emvpn_packet *pkt_enc = (struct emvpn_packet *)full_buffer_enc;
     uint16_t count, offset = 0, pktlen;
     uint16_t totlen = 0;
-    int total = (len / VPN_MAX_PKT) + 1; 
+    int total = (len / VPN_MAX_DATA) + 1; 
     for (count = 0; count < total; count++) {
         pkt_enc->vp_msg.type = emvpn_htons(VM_DATA);
-        pktlen = VPN_MAX_PKT;
+        pktlen = VPN_MAX_DATA;
         if ((len - offset) < pktlen) {
             pktlen = len - offset;
         }

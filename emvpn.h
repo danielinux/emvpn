@@ -5,7 +5,7 @@
 
 #define VPN_DEFAULT_PORT 1294
 #define VPN_MAX_PKT 1420
-#define VPN_MAX_DATA (VPN_MAX_PKT - (8 + sizeof struct emvpn_packet));
+#define VPN_MAX_DATA (VPN_MAX_PKT - sizeof(struct emvpn_packet_msg) - sizeof(struct vp_data))
 
 /****************************
  * Compiler selection
