@@ -75,18 +75,26 @@ static void emvpn_data(struct emvpn_socket *v, void *_data, int len)
             (v->frag_pending == NULL) ) {
 
         v->frag_pending = emvpn_alloc(pktlen);
+        v->frag_tot_len = pktlen;
     }
 
-    if (v->frag_pending && (v->frag_offset + fraglen <= pktlen)) {
+    if (v->frag_pending && (v->frag_offset + fraglen <= v->frag_tot_len)) {
         memcpy(v->frag_pending + v->frag_offset, data->vpd_data, fraglen);
         v->frag_offset += fraglen;
+    } else {
+        if (v->frag_pending)
+            emvpn_free(v->frag_pending);
+        v->frag_pending = NULL;
+        v->frag_offset = 0;
+        v->frag_tot_len = 0;
     }
 
-    if (v->frag_offset == pktlen) {
+    if (v->frag_offset == v->frag_tot_len) {
         emvpn_data_single(v, v->frag_pending, v->frag_offset);
         emvpn_free(v->frag_pending);
         v->frag_pending = NULL;
         v->frag_offset = 0;
+        v->frag_tot_len = 0;
     }
 }
 

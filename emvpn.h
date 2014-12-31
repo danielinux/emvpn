@@ -145,6 +145,7 @@ struct emvpn_socket {
     struct emvpn_session  *session;
     struct emvpn_socket   *next;
     uint8_t             *frag_pending;
+    uint16_t            frag_tot_len;
     uint16_t            frag_offset;
 };
 
