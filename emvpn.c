@@ -7,7 +7,7 @@ static struct emvpn_crypto CRYPTO;
 static struct emvpn_server SRV;
 
 /* Client socket */
-static struct emvpn_socket *cli;
+static struct emvpn_socket *cli = NULL;
 
 
 #define IS_SERVER() (SRV.is_server > 0)
@@ -40,27 +40,30 @@ static void emvpn_data(struct emvpn_socket *v, void *_data, int len)
     struct vp_data *data = emvpn_alloc(len - sizeof(struct emvpn_packet_msg));
     uint16_t pktlen, fraglen;
     uint8_t frags, frag_id;
+    int payload_len;
 
     if (!data)
          return;
 
     /* Decrypt */
-    if (CRYPTO.decrypt(v, (uint8_t *)data, pkt->vp_payload.vp_raw, len - sizeof(struct emvpn_packet_msg)) < 0)
+    payload_len = CRYPTO.decrypt(v, (uint8_t *)data, pkt->vp_payload.vp_raw, len - sizeof(struct emvpn_packet_msg));
+    if (payload_len <= 0)
         return;
-
-    /* Verify signature just after decrypt */
-    memcpy(sign, data->vpd_signature, VPN_SIGNATURE_SIZE);
-    CRYPTO.sign(data->vpd_data, emvpn_ntohs(data->vpd_frag_len), sign_calculated);
-    if (memcmp(sign_calculated, sign, VPN_SIGNATURE_SIZE) != 0) {
-        /* Bad packet */
-        return;
-    }
-
+    
     /* Adjust endianess */
     pktlen = emvpn_ntohs(data->vpd_pkt_len);
     fraglen = emvpn_ntohs(data->vpd_frag_len);
     frags = data->vpd_frags;
     frag_id = data->vpd_frag_id;
+
+    /* Verify signature just after decrypt */
+    memcpy(sign, data->vpd_signature, VPN_SIGNATURE_SIZE);
+    CRYPTO.sign(data->vpd_data, fraglen, sign_calculated);
+    if (memcmp(sign_calculated, sign, VPN_SIGNATURE_SIZE) != 0) {
+        /* Bad packet */
+        return;
+    }
+
 
     /* Fragmentation */
     if (pktlen < fraglen)
@@ -178,6 +181,13 @@ static struct emvpn_session *vlist_find(uint16_t ipver, void *addr, uint16_t por
 static struct emvpn_session *new_session(char *user, uint16_t ipver, void *addr, uint16_t port)
 {
     struct emvpn_session *vs;
+
+    vs = vlist_find(ipver, addr, port);
+    if (vs)
+        return vs;
+    
+    printf("New session.\n");
+
     vs = emvpn_alloc(sizeof(struct emvpn_session));
     if (!vs)
         return NULL;
@@ -202,6 +212,7 @@ static struct emvpn_session *new_session(char *user, uint16_t ipver, void *addr,
     }
     vs->sock->timer_retry = 0;
     vs->sock->session = vs;
+    vs->challenge = NULL;
     memcpy(vs->sock->user, user, VPN_MAX_USER);
     vlist_add(vs);
     return vs;
@@ -215,7 +226,8 @@ static void emvpn_send_challenge(struct emvpn_session *vs)
     if (SRV.random(challenge, VPN_CHALLENGE_SIZE) < 0)
         return;
 
-    vs->challenge = emvpn_alloc(VPN_CHALLENGE_SIZE);
+    if (!vs->challenge) 
+        vs->challenge = emvpn_alloc(VPN_CHALLENGE_SIZE);
     if (!vs->challenge)
         return;
 
@@ -223,6 +235,7 @@ static void emvpn_send_challenge(struct emvpn_session *vs)
         if (emvpn_dgram_send(vs->sock, VM_CHALLENGE, challenge, VPN_CHALLENGE_SIZE) > 0)
             vs->sock->state = VPN_CHALLENGE_SENT;
     }
+    printf("Challenge sent.\n");
 }
 
 static void emvpn_send_data(struct emvpn_socket *sck, void *data, int len)
@@ -233,6 +246,7 @@ static void emvpn_send_data(struct emvpn_socket *sck, void *data, int len)
     struct emvpn_packet *pkt_enc = (struct emvpn_packet *)full_buffer_enc;
     uint16_t count, offset = 0, pktlen;
     uint16_t totlen = 0;
+    int payload_len;
     int total = (len / VPN_MAX_DATA) + 1; 
     for (count = 0; count < total; count++) {
         pkt_enc->vp_msg.type = emvpn_htons(VM_DATA);
@@ -249,8 +263,9 @@ static void emvpn_send_data(struct emvpn_socket *sck, void *data, int len)
         pkt->vp_payload.vp_data.vpd_frags = total & 0xff;
         CRYPTO.sign((uint8_t *)data + offset, pktlen, pkt->vp_payload.vp_data.vpd_signature);
         memcpy(pkt->vp_payload.vp_data.vpd_data, (uint8_t *)data + offset, pktlen);
-        if (CRYPTO.encrypt(sck, pkt_enc->vp_payload.vp_raw, pkt->vp_payload.vp_raw, totlen) > 0) {
-            SYS.socket_send(sck, pkt_enc, totlen + sizeof(struct emvpn_packet_msg));
+        payload_len = CRYPTO.encrypt(sck, pkt_enc->vp_payload.vp_raw, pkt->vp_payload.vp_raw, totlen);
+        if (payload_len > 0) {
+            SYS.socket_send(sck, pkt_enc, payload_len + sizeof(struct emvpn_packet));
         }
         offset += pktlen;
     }
@@ -259,6 +274,7 @@ static void emvpn_send_data(struct emvpn_socket *sck, void *data, int len)
 static void emvpn_login(struct emvpn_socket *sck, void *data, int len)
 {
     struct emvpn_session *vs = sck->session;
+    printf("Login received\n");
     if (vs)
         emvpn_send_challenge(vs);
     emvpn_statetimer_add(vs->sock);
@@ -273,13 +289,19 @@ static void emvpn_response(struct emvpn_socket *sck, void *data, int len)
     if (!vs)
         return;
     if (memcmp(vs->challenge, pkt->vp_payload.vp_challenge, VPN_CHALLENGE_SIZE) == 0) {
-        if (emvpn_dgram_send(sck, VM_AUTH_OK, NULL, 0) > 0)
-            sck->state = VPN_SERVER_CONNECTED;
-        else
+        if (emvpn_dgram_send(sck, VM_AUTH_OK, NULL, 0) > 0) {
+            sck->state = VPN_SERVER_CONNECTED; 
+            printf("Connection established.\n");
+        } else {
             sck->state = VPN_STALE;
+        }
+    } else {
+        /* Auth failed. */
     }
-    emvpn_free(vs->challenge);
-    vs->challenge = NULL;
+    if (vs->challenge) {
+        emvpn_free(vs->challenge);
+        vs->challenge = NULL;
+    }
     emvpn_statetimer_add(vs->sock);
 }
 
@@ -329,11 +351,15 @@ static void emvpn_challenge(struct emvpn_socket *v, void *data, int len)
     struct emvpn_packet *pkt = (struct emvpn_packet *)data;
     uint8_t response[VPN_CHALLENGE_SIZE];
 
+    printf("Challenge received.\n");
+
     if (CRYPTO.encrypt(v, response, pkt->vp_payload.vp_challenge, VPN_CHALLENGE_SIZE) == VPN_CHALLENGE_SIZE) {
-        if (emvpn_dgram_send(v, VM_RESPONSE, response, VPN_CHALLENGE_SIZE) > 0)
+        if (emvpn_dgram_send(v, VM_RESPONSE, response, VPN_CHALLENGE_SIZE) > 0) {
             v->state = VPN_RESPONSE_SENT;
-        else
+            printf("Sent response.\n");
+        } else {
             v->state = VPN_IDLE;
+        }
     }
     emvpn_statetimer_add(v);
 }
@@ -422,7 +448,7 @@ struct emvpn_socket *emvpn_client(uint16_t ip_version, void *addr, uint16_t port
         return NULL;
     }
     v->timer_retry = 0;
-    memcpy(v->user, user, VPN_MAX_USER);
+    memcpy(v->user, user, strlen(user) + 1);
     if ((emvpn_send_login(v) < 0)) {
         emvpn_free(v);
         return NULL;
@@ -554,7 +580,7 @@ void emvpn_core_dev_recv(void *data, int len)
             cur = cur->next;
         }
     } else {
-        if (cli->state == VPN_CLIENT_CONNECTED) {
+        if (cli && (cli->state == VPN_CLIENT_CONNECTED)) {
             emvpn_send_data(cli, data, len);
         }
     }

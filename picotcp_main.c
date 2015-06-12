@@ -17,8 +17,6 @@ static struct emvpn_key secret = {
     "0123456789012345"
 };
 
-const char emvpn_user[]="test";
-
 int demo_get_key(char *user, struct emvpn_key *key)
 {
     const uint8_t secret[VPN_KEY_LEN] = "01234567890123456789012345678901";
@@ -91,7 +89,7 @@ static void client(int argc, char *argv[])
     if (inet_aton(argv[1], (struct in_addr *)&addr) < 0)
         exit(2);
 
-    sock = emvpn_client(4, &addr, port, emvpn_user, &secret);
+    sock = emvpn_client(4, &addr, port, "test", &secret);
     if (!sock) {
         perror("Starting VPN client");
         exit(1);
@@ -152,7 +150,7 @@ int crypto_init(void)
 int main(int argc, char *argv[])
 {
     char devname[IFNAMSIZ] = "emvpn0";
-    int ret = -1;
+    int tap_fd = -1;
 
     if(posix_init() < 0) {
         fprintf(stderr, "Error initializing posix module\n");
@@ -164,21 +162,11 @@ int main(int argc, char *argv[])
         strncpy(devname, "emsrv0", IFNAMSIZ);
     }
 
-#ifdef DRV_TAP
-    ret = drv_tap_init(devname, NULL);
-    if (ret < 0) {
+    tap_fd = drv_tap_init(devname, NULL);
+    if (tap_fd < 0) {
         fprintf(stderr, "Error initializing TAP module. (Are you root?)\n");
         return 1;
     }  
-#endif
-#ifdef DRV_STDIO
-    ret = drv_stdio_init(devname, NULL);
-    if (ret < 0) {
-        fprintf(stderr, "Error initializing TAP module. (Are you root?)\n");
-        return 1;
-    }  
-#endif
-
 
     if (crypto_init() < 0) {
         fprintf(stderr, "Error initializing crypto module.\n");
@@ -192,7 +180,7 @@ int main(int argc, char *argv[])
     else
         client(argc,argv);
 
-    evquick_addevent(ret, EVQUICK_EV_READ, dev_cb, dev_err_cb, NULL);
+    evquick_addevent(tap_fd, EVQUICK_EV_READ, dev_cb, dev_err_cb, NULL);
     
     for(;;) {
         evquick_loop();
